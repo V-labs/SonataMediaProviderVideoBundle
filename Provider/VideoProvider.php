@@ -21,6 +21,7 @@ use Sonata\MediaBundle\Thumbnail\ThumbnailInterface;
 use Sonata\MediaBundle\Metadata\MetadataBuilderInterface;
 use Sonata\AdminBundle\Form\FormMapper;
 use Symfony\Component\HttpFoundation\File\File;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\NotNull;
 use Doctrine\ORM\EntityManager;
@@ -92,18 +93,30 @@ class VideoProvider extends FileProvider {
      * {@inheritdoc}
      */
     public function buildCreateForm(FormMapper $formMapper) {
+
         $formMapper->add('binaryContent', 'file', array(
-            'constraints' => array(
-                new NotBlank(),
-                new NotNull(),
-            )
+            'attr' => [
+                'class' => 'dropzone-input'
+            ]
         ));
 
         $formMapper->add('thumbnailCapture', 'integer', array(
-            'mapped'        => false,
-            'required'      => false,
-            'label'         => 'Thumbnail generator (set value in seconds)',
+            'mapped'   => false,
+            'required' => false,
         ));
+
+        $formMapper->add('binaryContentRealPath', 'hidden', [
+            'mapped' => false
+        ]);
+        $formMapper->add('binaryContentOriginalName', 'hidden', [
+            'mapped' => false
+        ]);
+        $formMapper->add('binaryContentMimeType', 'hidden', [
+            'mapped' => false
+        ]);
+        $formMapper->add('binaryContentSize', 'hidden', [
+            'mapped' => false
+        ]);
     }
 
     /**
@@ -112,18 +125,35 @@ class VideoProvider extends FileProvider {
     public function buildEditForm(FormMapper $formMapper) {
         parent::buildEditForm($formMapper);
 
-        $formMapper->add('thumbnailCapture', 'integer', array(
-            'mapped'        => false,
-            'required'      => false,
-            'label'         => 'Thumbnail generator (set value in seconds)',
+        $formMapper->add('binaryContent', 'file', array(
+            'attr' => [
+                'class' => 'dropzone-input'
+            ]
         ));
+
+        $formMapper->add('thumbnailCapture', 'integer', array(
+            'mapped'   => false,
+            'required' => false
+        ));
+
+        $formMapper->add('binaryContentRealPath', 'hidden', [
+            'mapped' => false
+        ]);
+        $formMapper->add('binaryContentOriginalName', 'hidden', [
+            'mapped' => false
+        ]);
+        $formMapper->add('binaryContentMimeType', 'hidden', [
+            'mapped' => false
+        ]);
+        $formMapper->add('binaryContentSize', 'hidden', [
+            'mapped' => false
+        ]);
     }
 
     /**
      * {@inheritdoc}
      */
     protected function doTransform(MediaInterface $media) {
-
         parent::doTransform($media);
 
         if (!is_object($media->getBinaryContent()) && !$media->getBinaryContent()) {
@@ -187,6 +217,24 @@ class VideoProvider extends FileProvider {
     }
 
     /**
+     * Set the file contents for an image.
+     *
+     * @param \Sonata\MediaBundle\Model\MediaInterface $media
+     * @param string                                   $contents path to contents, defaults to MediaInterface BinaryContent
+     */
+    protected function setFileContents(MediaInterface $media, $contents = null)
+    {
+        parent::setFileContents($media, $contents);
+
+        if (!$contents) {
+            $contents = $media->getBinaryContent()->getRealPath();
+        }
+        
+        $fileSystem = new Fs();
+        $fileSystem->remove($contents);
+    }
+
+    /**
      * @param \Sonata\MediaBundle\Model\MediaInterface $media
      *
      * @return string
@@ -241,7 +289,7 @@ class VideoProvider extends FileProvider {
 
         // determino las dimensiones del vídeo
         $height = round($this->configVideoWidth * $media->getHeight() / $media->getWidth());
-        
+
         // corrección para que el alto no sea impar, si es impar PETA ffmpeg
         if($height % 2 != 0){
             $height = $height-1;
@@ -257,7 +305,7 @@ class VideoProvider extends FileProvider {
             // genero los nombres de archivos de cada uno de los formatos
             $pathMp4 = sprintf('%s/%s/videos_mp4_%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getId().'.mp4');
             $mp4 = preg_replace('/\.[^.]+$/', '.' . 'mp4', $pathMp4);
-            $video->save(new Video\X264(), $mp4);
+            $video->save(new Video\X264('aac'), $mp4);
             $media->setProviderMetadata(['filename_mp4' => $mp4]);
         }
 
@@ -278,7 +326,7 @@ class VideoProvider extends FileProvider {
             $filename = sprintf('videos_mp4_%s', $media->getId().'.mp4');
             $path = sprintf('%s/%s/', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media));
             $fs = new Fs();
-            $fs->copy($path.'/'.$media->getProviderReference(), $path.'/'.$filename, true);
+            $fs->rename($path.'/'.$media->getProviderReference(), $path.'/'.$filename, true);
         }
     }
 

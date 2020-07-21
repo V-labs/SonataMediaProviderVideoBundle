@@ -1,18 +1,15 @@
-<link href="http://vjs.zencdn.net/5.0.2/video-js.css" rel="stylesheet">
-<script src="http://vjs.zencdn.net/ie8/1.1.0/videojs-ie8.min.js"></script>
-<script src="http://vjs.zencdn.net/5.0.2/video.js"></script>  
+<link href="//vjs.zencdn.net/7.8.2/video-js.min.css" rel="stylesheet">
+<script src="//vjs.zencdn.net/7.8.2/video.min.js"></script>
 
 {# calculo el alto escalado del vídeo #}
-{% set height = width * media.height / media.width %}
+{#{% set height = width * media.height / media.width %}#}
 
 <video 
     id="video-{{ media.id }}" 
-    class="video-js" 
-    controls 
-    preload="auto" 
-    width="{{ width }}" 
-    height="{{ height }}"
-    poster="/uploads/media/{{ options.thumbnail.getKey() }}" data-setup="{}">
+    class="video-js vjs-big-play-centered"
+    controls
+    preload="auto"
+    poster="/uploads/media/{{ options.thumbnail.getKey() }}" data-setup='{"fluid": true}'>
 
     {% if media.providerMetadata.mp4_available is defined %}
         <source src="{{ options.video_mp4 }}" type="video/mp4">
