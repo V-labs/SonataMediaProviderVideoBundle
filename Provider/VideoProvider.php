@@ -2,14 +2,10 @@
 
 namespace Xmon\SonataMediaProviderVideoBundle\Provider;
 
-// use Symfony\Component\HttpFoundation\File\UploadedFile;
-//use Symfony\Component\HttpFoundation\Response;
 //use Symfony\Component\HttpFoundation\StreamedResponse;
-//use Symfony\Component\Form\FormBuilder;
-//use Symfony\Component\Form\Form;
-//use Sonata\AdminBundle\Validator\ErrorElement;
-//use Sonata\MediaBundle\Entity\BaseMedia as Media;
-//use Gaufrette\Adapter\Local;
+use GetId3\Exception\DefaultException;
+use RuntimeException;
+use SplFileInfo;
 use Symfony\Component\Filesystem\Filesystem as Fs;
 use Sonata\MediaBundle\Provider\FileProvider;
 use Sonata\MediaBundle\Model\MediaInterface;
@@ -21,9 +17,6 @@ use Sonata\MediaBundle\Thumbnail\ThumbnailInterface;
 use Sonata\MediaBundle\Metadata\MetadataBuilderInterface;
 use Sonata\AdminBundle\Form\FormMapper;
 use Symfony\Component\HttpFoundation\File\File;
-use Symfony\Component\HttpFoundation\File\UploadedFile;
-use Symfony\Component\Validator\Constraints\NotBlank;
-use Symfony\Component\Validator\Constraints\NotNull;
 use Doctrine\ORM\EntityManager;
 use Gaufrette\Filesystem;
 use FFMpeg\FFMpeg;
@@ -34,7 +27,8 @@ use FFMpeg\Format\Video;
 use Symfony\Component\DependencyInjection\ContainerInterface as Container;
 use GetId3\GetId3Core as GetId3;
 
-class VideoProvider extends FileProvider {
+class VideoProvider extends FileProvider
+{
 
     protected $allowedExtensions;
     protected $allowedMimeTypes;
@@ -52,58 +46,63 @@ class VideoProvider extends FileProvider {
     protected $thumbnail;
 
     /**
-     * @param string                                                $name
-     * @param \Gaufrette\Filesystem                                 $filesystem
-     * @param \Sonata\MediaBundle\CDN\CDNInterface                  $cdn
-     * @param \Sonata\MediaBundle\Generator\GeneratorInterface      $pathGenerator
-     * @param \Sonata\MediaBundle\Thumbnail\ThumbnailInterface      $thumbnail
-     * @param array                                                 $allowedExtensions
-     * @param array                                                 $allowedMimeTypes
-     * @param \Sonata\MediaBundle\Resizer\ResizerInterface          $resizer
-     * @param \Sonata\MediaBundle\Metadata\MetadataBuilderInterface $metadata
-     * @param \FFMpeg\FFMpeg                                        $FFMpeg
-     * @param \FFMpeg\FFProbe                                       $FFProbe
-     * @param \Symfony\Component\DependencyInjection\ContainerInterface $container
-     * @param \Doctrine\ORM\EntityManager $entityManager
+     * @param string                   $name
+     * @param Filesystem               $filesystem
+     * @param CDNInterface             $cdn
+     * @param GeneratorInterface       $pathGenerator
+     * @param ThumbnailInterface       $thumbnail
+     * @param array                    $allowedExtensions
+     * @param array                    $allowedMimeTypes
+     * @param ResizerInterface         $resizer
+     * @param MetadataBuilderInterface $metadata
+     * @param FFMpeg                   $FFMpeg
+     * @param FFProbe                  $FFProbe
+     * @param Container                $container
+     * @param EntityManager            $entityManager
+     *
+     * @throws DefaultException
      */
-    public function __construct($name, Filesystem $filesystem, CDNInterface $cdn, GeneratorInterface $pathGenerator, ThumbnailInterface $thumbnail, array $allowedExtensions = array(), array $allowedMimeTypes = array(), ResizerInterface $resizer, MetadataBuilderInterface $metadata = null, FFMpeg $FFMpeg, FFProbe $FFProbe, Container $container, EntityManager $entityManager) {
+    public function __construct($name, Filesystem $filesystem, CDNInterface $cdn, GeneratorInterface $pathGenerator, ThumbnailInterface $thumbnail, array $allowedExtensions = [], array $allowedMimeTypes = [], ResizerInterface $resizer, MetadataBuilderInterface $metadata = null, FFMpeg $FFMpeg, FFProbe $FFProbe, Container $container, EntityManager $entityManager)
+    {
 
         parent::__construct($name, $filesystem, $cdn, $pathGenerator, $thumbnail, $allowedExtensions, $allowedMimeTypes, $metadata);
 
         $this->allowedExtensions = $allowedExtensions;
-        $this->allowedMimeTypes = $allowedMimeTypes;
-        $this->metadata = $metadata;
-        $this->resizer = $resizer;
-        $this->getId3 = new GetId3;
-        $this->ffprobe = $FFProbe;
-        $this->ffmpeg = $FFMpeg;
-        $this->container = $container;
-        $this->em = $entityManager;
-        $this->thumbnail = $thumbnail;
+        $this->allowedMimeTypes  = $allowedMimeTypes;
+        $this->metadata          = $metadata;
+        $this->resizer           = $resizer;
+        $this->getId3            = new GetId3;
+        $this->ffprobe           = $FFProbe;
+        $this->ffmpeg            = $FFMpeg;
+        $this->container         = $container;
+        $this->em                = $entityManager;
+        $this->thumbnail         = $thumbnail;
 
         // configuración
         $this->configImageFrame = $this->container->getParameter('xmon_ffmpeg.image_frame');
         $this->configVideoWidth = $this->container->getParameter('xmon_ffmpeg.video_width');
-        $this->configMp4 = $this->container->getParameter('xmon_ffmpeg.mp4');
-        $this->configOgg = $this->container->getParameter('xmon_ffmpeg.ogg');
-        $this->configWebm = $this->container->getParameter('xmon_ffmpeg.webm');
+        $this->configMp4        = $this->container->getParameter('xmon_ffmpeg.mp4');
+        $this->configOgg        = $this->container->getParameter('xmon_ffmpeg.ogg');
+        $this->configWebm       = $this->container->getParameter('xmon_ffmpeg.webm');
     }
 
     /**
      * {@inheritdoc}
      */
-    public function buildCreateForm(FormMapper $formMapper) {
+    public function buildCreateForm(FormMapper $formMapper)
+    {
+        parent::buildCreateForm($formMapper);
 
-        $formMapper->add('binaryContent', 'file', array(
+        $formMapper->add('binaryContent', 'file', [
             'attr' => [
                 'class' => 'dropzone-input'
             ]
-        ));
+        ]);
 
-        $formMapper->add('thumbnailCapture', 'integer', array(
+        $formMapper->add('thumbnailCapture', 'integer', [
             'mapped'   => false,
             'required' => false,
-        ));
+        ]);
 
         $formMapper->add('binaryContentRealPath', 'hidden', [
             'mapped' => false
@@ -122,19 +121,20 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function buildEditForm(FormMapper $formMapper) {
+    public function buildEditForm(FormMapper $formMapper)
+    {
         parent::buildEditForm($formMapper);
 
-        $formMapper->add('binaryContent', 'file', array(
+        $formMapper->add('binaryContent', 'file', [
             'attr' => [
                 'class' => 'dropzone-input'
             ]
-        ));
+        ]);
 
-        $formMapper->add('thumbnailCapture', 'integer', array(
+        $formMapper->add('thumbnailCapture', 'integer', [
             'mapped'   => false,
             'required' => false
-        ));
+        ]);
 
         $formMapper->add('binaryContentRealPath', 'hidden', [
             'mapped' => false
@@ -153,7 +153,8 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    protected function doTransform(MediaInterface $media) {
+    protected function doTransform(MediaInterface $media)
+    {
         parent::doTransform($media);
 
         if (!is_object($media->getBinaryContent()) && !$media->getBinaryContent()) {
@@ -161,14 +162,14 @@ class VideoProvider extends FileProvider {
         }
 
         $stream = $this->ffprobe
-                ->streams($media->getBinaryContent()->getRealPath())
-                ->videos()
-                ->first();
+            ->streams($media->getBinaryContent()->getRealPath())
+            ->videos()
+            ->first();
 
         //$framecount = $stream->get('nb_frames');
         $duration = $stream->get('duration');
-        $height = $stream->get('height');
-        $width = $stream->get('width');
+        $height   = $stream->get('height');
+        $width    = $stream->get('width');
 
         /*
         // para recuperar las dimensiones de los vídeos codificados
@@ -193,13 +194,14 @@ class VideoProvider extends FileProvider {
     }
 
     /**
-     * @throws \RuntimeException
-     *
-     * @param \Sonata\MediaBundle\Model\MediaInterface $media
+     * @param MediaInterface $media
      *
      * @return
+     * @throws RuntimeException
+     *
      */
-    protected function fixBinaryContent(MediaInterface $media) {
+    protected function fixBinaryContent(MediaInterface $media)
+    {
         if ($media->getBinaryContent() === null) {
             return;
         }
@@ -207,7 +209,7 @@ class VideoProvider extends FileProvider {
         // if the binary content is a filename => convert to a valid File
         if (!$media->getBinaryContent() instanceof File) {
             if (!is_file($media->getBinaryContent())) {
-                throw new \RuntimeException('The file does not exist : ' . $media->getBinaryContent());
+                throw new RuntimeException('The file does not exist : ' . $media->getBinaryContent());
             }
 
             $binaryContent = new File($media->getBinaryContent());
@@ -219,8 +221,8 @@ class VideoProvider extends FileProvider {
     /**
      * Set the file contents for an image.
      *
-     * @param \Sonata\MediaBundle\Model\MediaInterface $media
-     * @param string                                   $contents path to contents, defaults to MediaInterface BinaryContent
+     * @param MediaInterface $media
+     * @param string         $contents path to contents, defaults to MediaInterface BinaryContent
      */
     protected function setFileContents(MediaInterface $media, $contents = null)
     {
@@ -229,25 +231,27 @@ class VideoProvider extends FileProvider {
         if (!$contents) {
             $contents = $media->getBinaryContent()->getRealPath();
         }
-        
+
         $fileSystem = new Fs();
         $fileSystem->remove($contents);
     }
 
     /**
-     * @param \Sonata\MediaBundle\Model\MediaInterface $media
+     * @param MediaInterface $media
      *
      * @return string
      */
-    protected function generateReferenceName(MediaInterface $media) {
+    protected function generateReferenceName(MediaInterface $media)
+    {
         return sha1($media->getName() . rand(11111, 99999)) . '.' . $media->getBinaryContent()->guessExtension();
     }
 
     /**
      * {@inheritdoc}
      */
-    public function getProviderMetadata() {
-        return new Metadata($this->getName(), $this->getName() . '.description', false, 'SonataMediaBundle', array('class' => 'fa fa fa-video-camera'));
+    public function getProviderMetadata()
+    {
+        return new Metadata($this->getName(), $this->getName() . '.description', false, 'SonataMediaBundle', ['class' => 'fa fa fa-video-camera']);
     }
 
     /**
@@ -261,7 +265,8 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function generateThumbnails(MediaInterface $media, $ext = 'jpg') {
+    public function generateThumbnails(MediaInterface $media, $ext = 'jpg')
+    {
         $this->generateReferenceImage($media);
 
         if (!$this->requireThumbnails()) {
@@ -273,7 +278,7 @@ class VideoProvider extends FileProvider {
         foreach ($this->getFormats() as $format => $settings) {
             if (substr($format, 0, strlen($media->getContext())) == $media->getContext() || $format === 'admin') {
                 $this->getResizer()->resize(
-                        $media, $referenceImage, $this->getFilesystem()->get($this->generateThumbsPrivateUrl($media, $format, $ext), true), $ext, $settings
+                    $media, $referenceImage, $this->getFilesystem()->get($this->generateThumbsPrivateUrl($media, $format, $ext), true), $ext, $settings
                 );
             }
         }
@@ -282,7 +287,8 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function generateVideos(MediaInterface $media) {
+    public function generateVideos(MediaInterface $media)
+    {
 
         // obtengo la ruta del archivo original
         $source = sprintf('%s/%s/%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getProviderReference());
@@ -291,49 +297,50 @@ class VideoProvider extends FileProvider {
         $height = round($this->configVideoWidth * $media->getHeight() / $media->getWidth());
 
         // corrección para que el alto no sea impar, si es impar PETA ffmpeg
-        if($height % 2 != 0){
-            $height = $height-1;
+        if ($height % 2 != 0) {
+            $height = $height - 1;
         }
 
         $video = $this->ffmpeg->open($source);
         $video
-                ->filters()
-                ->resize(new Dimension($this->configVideoWidth, $height))
-                ->synchronize();
+            ->filters()
+            ->resize(new Dimension($this->configVideoWidth, $height))
+            ->synchronize();
 
         if ($this->configMp4) {
             // genero los nombres de archivos de cada uno de los formatos
-            $pathMp4 = sprintf('%s/%s/videos_mp4_%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getId().'.mp4');
-            $mp4 = preg_replace('/\.[^.]+$/', '.' . 'mp4', $pathMp4);
+            $pathMp4 = sprintf('%s/%s/videos_mp4_%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getId() . '.mp4');
+            $mp4     = preg_replace('/\.[^.]+$/', '.' . 'mp4', $pathMp4);
             $video->save(new Video\X264('aac'), $mp4);
             $media->setProviderMetadata(['filename_mp4' => $mp4]);
         }
 
         if ($this->configOgg) {
-            $pathOgg = sprintf('%s/%s/videos_ogg_%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getId().'.ogg');
-            $ogg = preg_replace('/\.[^.]+$/', '.' . 'ogg', $pathOgg);
+            $pathOgg = sprintf('%s/%s/videos_ogg_%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getId() . '.ogg');
+            $ogg     = preg_replace('/\.[^.]+$/', '.' . 'ogg', $pathOgg);
             $video->save(new Video\Ogg(), $ogg);
         }
 
         if ($this->configWebm) {
-            $pathWebm = sprintf('%s/%s/videos_webm_%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getId().'.webm');
-            $webm = preg_replace('/\.[^.]+$/', '.' . 'webm', $pathWebm);
+            $pathWebm = sprintf('%s/%s/videos_webm_%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getId() . '.webm');
+            $webm     = preg_replace('/\.[^.]+$/', '.' . 'webm', $pathWebm);
             $video->save(new Video\WebM(), $webm);
         }
 
         //If no conversion format available simply duplicate file with the right name
         if (!$this->configMp4 && !$this->configOgg && !$this->configOgg) {
-            $filename = sprintf('videos_mp4_%s', $media->getId().'.mp4');
-            $path = sprintf('%s/%s/', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media));
-            $fs = new Fs();
-            $fs->rename($path.'/'.$media->getProviderReference(), $path.'/'.$filename, true);
+            $filename = sprintf('videos_mp4_%s', $media->getId() . '.mp4');
+            $path     = sprintf('%s/%s/', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media));
+            $fs       = new Fs();
+            $fs->rename($path . '/' . $media->getProviderReference(), $path . '/' . $filename, true);
         }
     }
 
     /**
      * {@inheritdoc}
      */
-    public function generateThumbsPrivateUrl($media, $format, $ext = 'jpg') {
+    public function generateThumbsPrivateUrl($media, $format, $ext = 'jpg')
+    {
         return sprintf('%s/thumb_%s_%s.%s', $this->generatePath($media), $media->getId(), $format, $ext
         );
     }
@@ -341,22 +348,23 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function generatePrivateUrl(MediaInterface $media, $format) {
-        $path = $this->generateUrl($media, $format);
-
-        return $path;
+    public function generatePrivateUrl(MediaInterface $media, $format)
+    {
+        return $this->generateUrl($media, $format);
     }
 
     /**
      * {@inheritdoc}
      */
-    public function generatePublicUrl(MediaInterface $media, $format) {
+    public function generatePublicUrl(MediaInterface $media, $format)
+    {
         $path = $this->generateUrl($media, $format);
 
         return $this->getCdn()->getPath($path, $media->getCdnIsFlushable());
     }
 
-    private function generateUrl(MediaInterface $media, $format){
+    private function generateUrl(MediaInterface $media, $format)
+    {
         if ($format == 'reference') {
             $path = sprintf('%s/%s', $this->generatePath($media), $media->getProviderReference());
         } elseif ($format == 'admin') {
@@ -364,11 +372,11 @@ class VideoProvider extends FileProvider {
         } elseif ($format == 'thumb_admin') {
             $path = sprintf('%s/thumb_%d_%s.jpg', $this->generatePath($media), $media->getId(), 'admin');
         } elseif ($format == 'videos_ogg') {
-            $path = sprintf('%s/%s_%s', $this->generatePath($media), $format, str_replace($media->getExtension(), 'ogg', $media->getId().'.ogg'));
+            $path = sprintf('%s/%s_%s', $this->generatePath($media), $format, str_replace($media->getExtension(), 'ogg', $media->getId() . '.ogg'));
         } elseif ($format == 'videos_webm') {
-            $path = sprintf('%s/%s_%s', $this->generatePath($media), $format, str_replace($media->getExtension(), 'webm', $media->getId().'.webm' ));
+            $path = sprintf('%s/%s_%s', $this->generatePath($media), $format, str_replace($media->getExtension(), 'webm', $media->getId() . '.webm'));
         } elseif ($format == 'videos_mp4') {
-            $path = sprintf('%s/%s_%s', $this->generatePath($media), $format, str_replace($media->getExtension(), 'mp4', $media->getId().'.mp4'));
+            $path = sprintf('%s/%s_%s', $this->generatePath($media), $format, str_replace($media->getExtension(), 'mp4', $media->getId() . '.mp4'));
         } else {
             $path = sprintf('%s/thumb_%d_%s.jpg',
                 $this->generatePath($media),
@@ -376,62 +384,66 @@ class VideoProvider extends FileProvider {
                 $format
             );
         }
+
         return $path;
     }
 
     /**
      * {@inheritdoc}
      */
-    public function getHelperProperties(MediaInterface $media, $format, $options = array()) {
+    public function getHelperProperties(MediaInterface $media, $format, $options = [])
+    {
         if ($format == 'reference') {
             $box = $media->getBox();
         } else {
             $resizerFormat = $this->getFormat($format);
             if ($resizerFormat === false) {
-                throw new \RuntimeException(sprintf('The image format "%s" is not defined.
+                throw new RuntimeException(sprintf('The image format "%s" is not defined.
                         Is the format registered in your ``sonata_media`` configuration?', $format));
             }
 
             $box = $this->resizer->getBox($media, $resizerFormat);
         }
 
-        return array_merge(array(
-            'id' => key_exists("id", $options) ? $options["id"] : $media->getId(),
-            'alt' => $media->getName(),
-            'title' => $media->getName(),
-            'thumbnail' => $this->getReferenceImage($media),
-            'src' => $this->generatePublicUrl($media, $format),
-            'file' => $this->generatePublicUrl($media, $format),
-            'realref' => $media->getProviderReference(),
-            'width' => $box->getWidth(),
-            'height' => $box->getHeight(),
-            'duration' => $media->getLength(),
-            'video_mp4' => $this->generatePublicUrl($media, "videos_mp4"),
-            'video_ogg' => $this->generatePublicUrl($media, "videos_ogg"),
+        return array_merge([
+            'id'         => key_exists("id", $options) ? $options["id"] : $media->getId(),
+            'alt'        => $media->getName(),
+            'title'      => $media->getName(),
+            'thumbnail'  => $this->getReferenceImage($media),
+            'src'        => $this->generatePublicUrl($media, $format),
+            'file'       => $this->generatePublicUrl($media, $format),
+            'realref'    => $media->getProviderReference(),
+            'width'      => $box->getWidth(),
+            'height'     => $box->getHeight(),
+            'duration'   => $media->getLength(),
+            'video_mp4'  => $this->generatePublicUrl($media, "videos_mp4"),
+            'video_ogg'  => $this->generatePublicUrl($media, "videos_ogg"),
             'video_webm' => $this->generatePublicUrl($media, "videos_webm")
-                ), $options);
+        ], $options);
     }
 
     /**
      * {@inheritdoc}
      */
-    public function getReferenceImage(MediaInterface $media) {
+    public function getReferenceImage(MediaInterface $media)
+    {
         return $this->getFilesystem()->get(sprintf('%s/%s', $this->generatePath($media), str_replace($this->getExtension($media), 'jpg', $media->getProviderReference())), true);
     }
 
     /**
      * {@inheritdoc}
      */
-    public function generateReferenceImage(MediaInterface $media) {
+    public function generateReferenceImage(MediaInterface $media)
+    {
 
         $path = sprintf(
-                '%s/%s/%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getProviderReference()
+            '%s/%s/%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getProviderReference()
         );
 
         $stream = $this->ffprobe
-                ->streams($path)
-                ->videos()
-                ->first();
+            ->streams($path)
+            ->videos()
+            ->first();
 
         /* $framecount = $stream->get('nb_frames');
           $duration = $stream->get('duration');
@@ -456,7 +468,7 @@ class VideoProvider extends FileProvider {
         }
 
         $timecode = TimeCode::fromSeconds($seconds_extract);
-        $frame = $video->frame($timecode);
+        $frame    = $video->frame($timecode);
 
         if (!$frame) {
             echo "Thumbnail Generation Failed";
@@ -464,16 +476,17 @@ class VideoProvider extends FileProvider {
         }
 
         $thumnailPath = sprintf(
-                '%s/%s/%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), str_replace(
-                        $this->getExtension($media), 'jpg', $media->getProviderReference()
-                )
+            '%s/%s/%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), str_replace(
+                $this->getExtension($media), 'jpg', $media->getProviderReference()
+            )
         );
 
         $frame->save($thumnailPath);
     }
 
-    private function updateConfigFrameValue($media){
-        $uniqid = $this->container->get('request')->query->get('uniqid');
+    private function updateConfigFrameValue($media)
+    {
+        $uniqid   = $this->container->get('request')->query->get('uniqid');
         $formData = $this->container->get('request')->request->get($uniqid);
 
         if (!empty($formData['thumbnailCapture'])) {
@@ -483,19 +496,20 @@ class VideoProvider extends FileProvider {
         }
     }
 
-    private function setProviderMetadataAvailableVideoFormat(MediaInterface $media){
+    private function setProviderMetadataAvailableVideoFormat(MediaInterface $media)
+    {
         $this->updateConfigFrameValue($media);
         $metadata = $media->getProviderMetadata('filename');
 
         // genero los nombres de archivos de cada uno de los formatos
         if ($this->configMp4) {
-             $metadata['mp4_available'] = true;
+            $metadata['mp4_available'] = true;
         }
         if ($this->configOgg) {
-             $metadata['ogg_available'] = true;
+            $metadata['ogg_available'] = true;
         }
         if ($this->configWebm) {
-             $metadata['webm_available'] = true;
+            $metadata['webm_available'] = true;
         }
         if (!$this->configMp4 && !$this->configOgg && !$this->configOgg) {
             $metadata['mp4_available'] = true;
@@ -504,7 +518,8 @@ class VideoProvider extends FileProvider {
         $media->setProviderMetadata($metadata);
     }
 
-    private function getAvailableFormatToUpdateOrDelete(){
+    private function getAvailableFormatToUpdateOrDelete()
+    {
         if ($this->configMp4) {
             $this->addFormat('videos_mp4', 'mp4');
         }
@@ -524,7 +539,8 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function prePersist(MediaInterface $media) {
+    public function prePersist(MediaInterface $media)
+    {
         if (!$media->getBinaryContent()) {
             return;
         }
@@ -535,7 +551,8 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function postPersist(MediaInterface $media) {
+    public function postPersist(MediaInterface $media)
+    {
         if (!$media->getBinaryContent()) {
             return;
         }
@@ -550,8 +567,8 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function preRemove(MediaInterface $media) {
-        
+    public function preRemove(MediaInterface $media)
+    {
         // arreglo para eliminar la relación del video con la galería
         if ($galleryHasMedias = $media->getGalleryHasMedias()) {
             foreach ($galleryHasMedias as $galleryHasMedia) {
@@ -575,14 +592,16 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function postRemove(MediaInterface $media) {
+    public function postRemove(MediaInterface $media)
+    {
         // QUIZÁS el lugar donde eliminar los archivos
     }
 
     /**
      * {@inheritdoc}
      */
-    public function preUpdate(MediaInterface $media) {
+    public function preUpdate(MediaInterface $media)
+    {
         if (!$media->getBinaryContent()) {
             return;
         }
@@ -593,8 +612,9 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function postUpdate(MediaInterface $media) {
-        if (!$media->getBinaryContent() instanceof \SplFileInfo) {
+    public function postUpdate(MediaInterface $media)
+    {
+        if (!$media->getBinaryContent() instanceof SplFileInfo) {
             return;
         }
 
@@ -624,8 +644,9 @@ class VideoProvider extends FileProvider {
     /**
      * {@inheritdoc}
      */
-    public function updateMetadata(MediaInterface $media, $force = false) {
-        $file = sprintf('%s/%s/%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getProviderReference());
+    public function updateMetadata(MediaInterface $media, $force = false)
+    {
+        $file      = sprintf('%s/%s/%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePath($media), $media->getProviderReference());
         $fileinfos = new ffmpeg_movie($file, false);
 
         $img_par_s = $fileinfos->getFrameCount() / $fileinfos->getDuration();
@@ -645,74 +666,60 @@ class VideoProvider extends FileProvider {
     }
 
     /**
-     * @param \Sonata\MediaBundle\Model\MediaInterface $media
+     * @param MediaInterface $media
      *
      * @return string the file extension for the $media, or the $defaultExtension if not available
-    */
-    protected function getExtension(MediaInterface $media) {
+     */
+    protected function getExtension(MediaInterface $media)
+    {
         $ext = $media->getExtension();
         if (!is_string($ext) || strlen($ext) < 2) {
             $ext = "mp4";
         }
+
         return $ext;
-    } 
+    }
 
-    ////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////
-    // CON PROBLEMAS
-    ////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////
-
+//    public function getDownloadResponse(MediaInterface $media, $format, $mode, array $headers = [])
+//    {
+//        // build the default headers
+//        $headers = array_merge([
+//            'Content-Type'        => $media->getContentType(),
+//            'Content-Disposition' => sprintf('attachment; filename="%s"', $media->getMetadataValue('filename')),
+//        ], $headers);
+//
+//        if (!in_array($mode, ['http', 'X-Sendfile', 'X-Accel-Redirect'])) {
+//            throw new \RuntimeException('Invalid mode provided');
+//        }
+//
+//        if ($mode == 'http') {
+//            $provider = $this;
+//
+//            return new StreamedResponse(function () use ($provider, $media, $format) {
+//                if ($format == 'reference') {
+//                    echo $provider->getReferenceFile($media)->getContent();
+//                } else {
+//                    echo $provider->getFilesystem()->get($provider->generatePrivateUrl($media, $format))->getContent();
+//                }
+//            }, 200, $headers);
+//        }
+//
+//        if (!$this->getFilesystem()->getAdapter() instanceof \Sonata\MediaBundle\Filesystem\Local) {
+//            throw new \RuntimeException('Cannot use X-Sendfile or X-Accel-Redirect with non \Sonata\MediaBundle\Filesystem\Local');
+//        }
+//
+//        $headers[$mode] = sprintf('%s/%s', $this->getFilesystem()->getAdapter()->getDirectory(),
+//            $this->generatePrivateUrl($media, $format)
+//        );
+//
+//        return new Response('', 200, $headers);
+//    }
 
     /**
      * {@inheritdoc}
-      public function getDownloadResponse(MediaInterface $media, $format, $mode, array $headers = array()) {
-
-      // build the default headers
-      $headers = array_merge(array(
-      'Content-Type' => $media->getContentType(),
-      'Content-Disposition' => sprintf('attachment; filename="%s"', $media->getMetadataValue('filename')),
-      ), $headers);
-
-      if (!in_array($mode, array('http', 'X-Sendfile', 'X-Accel-Redirect'))) {
-      throw new \RuntimeException('Invalid mode provided');
-      }
-
-      if ($mode == 'http') {
-      $provider = $this;
-
-      return new StreamedResponse(function() use ($provider, $media, $format) {
-      if ($format == 'reference') {
-      echo $provider->getReferenceFile($media)->getContent();
-      } else {
-      echo $provider->getFilesystem()->get($provider->generatePrivateUrl($media, $format))->getContent();
-      }
-      }, 200, $headers);
-      }
-
-      if (!$this->getFilesystem()->getAdapter() instanceof \Sonata\MediaBundle\Filesystem\Local) {
-      throw new \RuntimeException('Cannot use X-Sendfile or X-Accel-Redirect with non \Sonata\MediaBundle\Filesystem\Local');
-      }
-
-      $headers[$mode] = sprintf('%s/%s', $this->getFilesystem()->getAdapter()->getDirectory(), $this->generatePrivateUrl($media, $format)
-      );
-
-      return new Response('', 200, $headers);
-      }
      */
-    /**
-     * {@inheritdoc}
-      public function getReferenceFile(MediaInterface $media) {
-      return $this->getFilesystem()->get(sprintf('%s/%s', $this->generatePath($media), $media->getProviderReference()), true);
-      }
-     */
-    /*
-     * NO SE USA
-     * public function getReferencePath(MediaInterface $media, $format) {
-      return $this->getFilesystem()->get(sprintf('%s/%s_%s', $this->generatePath($media), $format, $media->getProviderReference()), true);
-      } */
-    /**
-    public function setLogger($logger) {
-        $this->logger = $logger;
-    }*/
+    public function getReferenceFile(MediaInterface $media)
+    {
+        return $this->getFilesystem()->get(sprintf('%s/%s', $this->generatePath($media), sprintf('videos_mp4_%s', $media->getId().'.mp4')), true);
+    }
 }
