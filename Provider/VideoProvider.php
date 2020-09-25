@@ -4,6 +4,7 @@ namespace Xmon\SonataMediaProviderVideoBundle\Provider;
 
 //use Symfony\Component\HttpFoundation\StreamedResponse;
 use GetId3\Exception\DefaultException;
+use ReflectionMethod;
 use RuntimeException;
 use SplFileInfo;
 use Symfony\Component\Filesystem\Filesystem as Fs;
@@ -226,14 +227,19 @@ class VideoProvider extends FileProvider
      */
     protected function setFileContents(MediaInterface $media, $contents = null)
     {
-        parent::setFileContents($media, $contents);
+        $file = $this->getFilesystem()->get(sprintf('%s/%s', $this->generatePath($media), $media->getProviderReference()), true);
 
-        if (!$contents) {
-            $contents = $media->getBinaryContent()->getRealPath();
-        }
+        $adapter = $this->getFilesystem()->getAdapter();
+
+        $computePath = new ReflectionMethod(get_class($adapter), 'computePath');
+        $computePath->setAccessible(true);
+
+        $originFile = $media->getBinaryContent()->getRealPath();
+        $targetFile = $computePath->invoke($adapter, $file->getKey());
 
         $fileSystem = new Fs();
-        $fileSystem->remove($contents);
+        $fileSystem->copy($originFile, $targetFile);
+        $fileSystem->remove($originFile);
     }
 
     /**

@@ -82,21 +82,21 @@ class VideoController extends Controller
             ]);
         }
 
-        $fileSystem = new Filesystem();
-
         $fileId     = $request->query->get('dzuuid');
         $chunkTotal = $request->query->get('dztotalchunkcount');
         $fileType   = substr($request->query->get('filename'), strrpos($request->query->get('filename'), '.') + 1);
         $targetPath = sprintf('%s/', $this->get('kernel')->getRootDir() . '/../web/uploads/media/tmp');
 
         // ===== concatenate uploaded files =====
-        // set emtpy string for file content concatenation
-        $fileContent = "";
 
         // loop through temp files and grab the content
         for ($i = 1; $i <= $chunkTotal; $i++) {
             // target temp file
             if (!$tempFilePath = realpath("{$targetPath}{$fileId}-{$i}.{$fileType}")) {
+                if ($finalFilePath = realpath("{$targetPath}{$fileId}.{$fileType}")) {
+                    unlink($finalFilePath);
+                }
+
                 return new Response(json_encode(["error" => "Your chunk was lost mid-upload."]), 400, [
                     'Content-Type' => 'application/json'
                 ]);
@@ -106,26 +106,33 @@ class VideoController extends Controller
 
             // check chunk content
             if (empty($chunk)) {
+                unlink($tempFilePath);
+
+                if ($finalFilePath = realpath("{$targetPath}{$fileId}.{$fileType}")) {
+                    unlink($finalFilePath);
+                }
+
                 return new Response(json_encode(["error" => "Chunks are uploading as empty strings."]), 400, [
                     'Content-Type' => 'application/json'
                 ]);
             }
 
-            // add chunk to main file
-            $fileContent .= $chunk;
+            // create and write concatenated chunk to the main file
+            file_put_contents("{$targetPath}{$fileId}.{$fileType}", $chunk, FILE_APPEND);
 
             // delete chunk
             unlink($tempFilePath);
 
             if (file_exists($tempFilePath)) {
+                if ($finalFilePath = realpath("{$targetPath}{$fileId}.{$fileType}")) {
+                    unlink($finalFilePath);
+                }
+
                 return new Response(json_encode(["error" => "Your temp files could not be deleted."]), 400, [
                     'Content-Type' => 'application/json'
                 ]);
             }
         }
-
-        // create and write concatenated chunk to the main file
-        file_put_contents("{$targetPath}{$fileId}.{$fileType}", $fileContent);
 
         return new Response(json_encode([
             'binaryContentRealPath' => "{$targetPath}{$fileId}.{$fileType}"
